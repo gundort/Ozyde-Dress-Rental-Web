@@ -119,6 +119,9 @@ if (isset($_POST['update_image_order']) && !empty($_POST['image_order'])) {
 
 // Create/update product
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['remove_image']) && !isset($_POST['update_image_order'])) {
+
+// Create/update product
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!check_csrf($_POST['_csrf'] ?? '')) {
         $errors[] = 'Invalid CSRF token.';
     } else {
@@ -129,6 +132,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['remove_image']) && !
         $category_id = isset($_POST['category_id']) && $_POST['category_id'] !== '' ? (int)$_POST['category_id'] : null;
         
         // Handle sizes with DEFAULT STOCK OF 5 for all sizes
+        // Handle sizes like the working example
         $sizes = $_POST['sizes'] ?? [];
         $stocks = $_POST['stocks'] ?? [];
         
@@ -137,6 +141,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['remove_image']) && !
             $size = trim($size);
             // DEFAULT STOCK: Always set to 5 regardless of input
             $qty = 5;
+            $qty = max(0, intval($stocks[$i] ?? 0));
             if ($size) {
                 $size_stock_pairs[] = $size . ':' . $qty;
             }
@@ -199,6 +204,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['remove_image']) && !
                     } else {
                         $errors[] = "Failed to update product: " . $stmt->error;
                         error_log("ERROR: Failed to update product $id: " . $stmt->error);
+                    // Update existing product
+                    $stmt = $mysqli->prepare("UPDATE products SET category_id=?, name=?, description=?, size=?, color=?, price=? WHERE product_id=?");
+                    $stmt->bind_param('isssdsi', $category_id, $name, $description, $size_str, $color, $price, $id);
+                    $stmt->execute();
+                    
+                    // Only delete existing images if new ones are uploaded
+                    if (!empty($uploaded_images)) {
+                        $delete_stmt = $mysqli->prepare("DELETE FROM product_images WHERE product_id = ?");
+                        $delete_stmt->bind_param('i', $id);
+                        $delete_stmt->execute();
+                        $delete_stmt->close();
                     }
                 } else {
                     // Insert new product - all products are rentals (is_rental=1)
@@ -253,6 +269,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['remove_image']) && !
                         if (!$update_stmt->execute()) {
                             $errors[] = "Failed to update primary image: " . $update_stmt->error;
                         }
+                    $stmt->execute();
+                    $id = $mysqli->insert_id;
+                }
+
+                // Insert all images into product_images table
+                if (!empty($uploaded_images)) {
+                    foreach ($uploaded_images as $index => $image_path) {
+                        $is_primary = ($index === 0) ? 1 : 0; // First image is primary
+                        $img_stmt = $mysqli->prepare("INSERT INTO product_images (product_id, filename, is_primary) VALUES (?, ?, ?)");
+                        $img_stmt->bind_param('isi', $id, $image_path, $is_primary);
+                        $img_stmt->execute();
+                        $img_stmt->close();
+                    }
+                    
+                    // Update products table with the primary image
+                    if (!empty($uploaded_images[0])) {
+                        $update_stmt = $mysqli->prepare("UPDATE products SET image = ? WHERE product_id = ?");
+                        $update_stmt->bind_param('si', $uploaded_images[0], $id);
+                        $update_stmt->execute();
                         $update_stmt->close();
                     }
                 }
@@ -271,6 +306,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['remove_image']) && !
 }
 
 // Load product if editing - This should happen AFTER form processing to show updated values
+                // Log activity
+                $log = $mysqli->prepare("INSERT INTO activity_log (admin_id, action, context) VALUES (?, ?, ?)");
+                $act = $id ? 'product_updated' : 'product_created';
+                $ctx = json_encode(['product_id'=>$id,'name'=>$name]);
+                $log->bind_param('iss', $_SESSION['admin_id'], $act, $ctx);
+                $log->execute();
+                
+                header("Location: products_list.php");
+                exit;
+            }
+        }
+    }
+}
+
+// Load product if editing
 $product = null;
 $sizes = [];
 $existing_images = [];
@@ -296,6 +346,8 @@ if ($id) {
     
     // Get existing product images with ordering
     $img_stmt = $mysqli->prepare("SELECT * FROM product_images WHERE product_id = ? ORDER BY display_order ASC, is_primary DESC");
+    // Get existing product images
+    $img_stmt = $mysqli->prepare("SELECT * FROM product_images WHERE product_id = ? ORDER BY is_primary DESC");
     $img_stmt->bind_param('i', $id);
     $img_stmt->execute();
     $existing_images_result = $img_stmt->get_result();
@@ -509,6 +561,7 @@ $categories = $catRes ? $catRes->fetch_all(MYSQLI_ASSOC) : [];
                value="<?= e($product['color'] ?? '') ?>" 
                onkeypress="return validateColorInput(event)" />
         <div class="color-hint">Only letters and spaces allowed. Examples: Red, Navy Blue, Emerald Green</div>
+        <input type="text" name="color" value="<?= e($product['color'] ?? '') ?>" />
 
         <label>Price (ZAR) *</label>
         <input type="number" name="price" min="0" step="0.01" value="<?= e($product['price'] ?? '0') ?>" required />
@@ -517,18 +570,22 @@ $categories = $catRes ? $catRes->fetch_all(MYSQLI_ASSOC) : [];
         <div class="stock-info">
             <strong>Note:</strong> All sizes will automatically have a stock quantity of 5. The stock input is disabled as this is managed automatically.
         </div>
+        <label>Sizes & Stock (Admin Only)</label>
+        <div class="muted">Stock quantities are for admin reference only and won't be shown to customers.</div>
         <div id="sizesContainer">
             <?php if (!empty($sizes)): ?>
                 <?php foreach($sizes as $size): ?>
                     <div class="size-stock">
                         <input type="text" name="sizes[]" placeholder="S/M/L/XL" value="<?= e($size['size']) ?>" />
                         <input type="number" name="stocks[]" placeholder="Qty" value="5" min="0" readonly disabled />
+                        <input type="number" name="stocks[]" placeholder="Qty" min="0" value="<?= e($size['stock']) ?>" />
                     </div>
                 <?php endforeach; ?>
             <?php else: ?>
                 <div class="size-stock">
                     <input type="text" name="sizes[]" placeholder="S/M/L/XL" />
                     <input type="number" name="stocks[]" placeholder="Qty" value="5" min="0" readonly disabled />
+                    <input type="number" name="stocks[]" placeholder="Qty" min="0" />
                 </div>
             <?php endif; ?>
         </div>
@@ -548,6 +605,13 @@ $categories = $catRes ? $catRes->fetch_all(MYSQLI_ASSOC) : [];
                 <div class="image-previews" id="existingImages">
                     <?php foreach ($existing_images as $image): ?>
                         <div class="image-preview" data-image-id="<?= $image['image_id'] ?>">
+        <!-- Existing images display -->
+        <?php if ($id && !empty($existing_images)): ?>
+            <div class="existing-images">
+                <h4>Current Images (new uploads will replace these):</h4>
+                <div class="image-previews">
+                    <?php foreach ($existing_images as $image): ?>
+                        <div class="image-preview">
                             <img src="../<?= e($image['filename']) ?>" alt="Product image" onerror="this.src='../images/placeholder.png'">
                             <?php if ($image['is_primary']): ?>
                                 <div class="primary-badge">Primary</div>
@@ -562,6 +626,7 @@ $categories = $catRes ? $catRes->fetch_all(MYSQLI_ASSOC) : [];
         <?php elseif ($id && !empty($product['image'])): ?>
             <div class="existing-images">
                 <h4>Current Primary Image (new uploads will be added to existing images):</h4>
+                <h4>Current Primary Image (new uploads will replace this):</h4>
                 <div class="image-previews">
                     <div class="image-preview">
                         <img src="../<?= e($product['image']) ?>" alt="Current image">
@@ -591,6 +656,10 @@ $categories = $catRes ? $catRes->fetch_all(MYSQLI_ASSOC) : [];
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+        <button type="submit"><?= $id ? 'Update Product' : 'Add Product' ?></button>
+        <a href="products_list.php" style="margin-left:12px; color:#666; text-decoration:none;">Cancel</a>
+    </form>
+</main>
 <script>
 function addSizeField() {
     const div = document.createElement('div');
@@ -665,6 +734,11 @@ document.getElementById('productForm').addEventListener('submit', function(e) {
 });
 
 // Image preview functionality for new uploads
+    div.innerHTML = '<input type="text" name="sizes[]" placeholder="S/M/L/XL" /><input type="number" name="stocks[]" placeholder="Qty" min="0" />';
+    document.getElementById('sizesContainer').appendChild(div);
+}
+
+// Image preview functionality
 document.getElementById('imageInput').addEventListener('change', function(e) {
     const previewsContainer = document.getElementById('imagePreviews');
     previewsContainer.innerHTML = '';
@@ -836,6 +910,23 @@ document.getElementById('productForm').addEventListener('submit', function() {
     setTimeout(() => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }, 100);
+});
+</script>
+</body>
+</html>
+// Form validation
+document.getElementById('productForm').addEventListener('submit', function(e) {
+    const imageInput = document.getElementById('imageInput');
+    const files = imageInput.files;
+    
+    // Check file sizes (max 10MB per image)
+    for (let i = 0; i < files.length; i++) {
+        if (files[i].size > 10 * 1024 * 1024) {
+            e.preventDefault();
+            alert('File "' + files[i].name + '" is too large. Maximum size is 10MB per image.');
+            return;
+        }
+    }
 });
 </script>
 </body>
