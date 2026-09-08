@@ -1,14 +1,14 @@
-Ozyde
+# Ozyde
 
-Smart luxury rental for Mzansi.
+## Smart luxury rental for Mzansi.
 
 Ozyde is a premium dress rental and custom design platform built for the South African market. It connects customers with designer dresses for weddings, matric dances, birthdays, and formal events — making luxury accessible without the cost of ownership.
 
-Overview
+## Overview
 
 Ozyde handles the complete rental lifecycle: browse, book, pay, receive, wear, return. The platform includes real-time availability tracking, personalised recommendations, multiple payment options, and a custom order service for made-to-measure dresses.
 
-Tech Stack
+## Tech Stack
 
 Layer	Technology
 Backend	PHP 7.4+
@@ -20,7 +20,7 @@ APIs	Google Maps Places API, Google OAuth API
 Libraries	Sortable.js, Font Awesome
 Key Features
 
-User Authentication
+## User Authentication
 
 Secure registration with email verification
 Google OAuth 2.0 login
@@ -84,7 +84,7 @@ Input sanitisation and output escaping
 Session validation on all restricted pages
 Getting Started
 
-Requirements
+## Requirements
 
 PHP 7.4 or higher
 MySQL 5.7 or higher
@@ -106,7 +106,7 @@ define('DB_USER', 'your_username');
 define('DB_PASS', 'your_password');
 Set up Google OAuth credentials and Maps API keys in the respective configuration files.
 
-File Structure
+## File Structure
 
 text
 /ozyde/
@@ -131,7 +131,7 @@ License
 
 This project is proprietary and confidential. Unauthorised copying, distribution, or use is strictly prohibited.
 
-Contact
+## Contact
 
 Ozyde Rentals
 5 Liebenberg Rd, Noordwyk, Midrand 1687
